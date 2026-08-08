@@ -18,7 +18,7 @@ permissions:
 jobs:
 
   # ============================================================
-  # STAGE 1 - CI / DEVSECOPS SECURITY SCAN
+  # STAGE 1 - CI / DEVSECOPS
   # ============================================================
 
   security_scan:
@@ -31,46 +31,22 @@ jobs:
 
     steps:
 
-      # ----------------------------------------------------------
-      # Checkout Repository
-      # ----------------------------------------------------------
-
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      # ----------------------------------------------------------
-      # Setup Terraform
-      # ----------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      # ----------------------------------------------------------
-      # Terraform Format Check
-      # ----------------------------------------------------------
-
       - name: Terraform Format Check
         run: terraform fmt -check -recursive ../..
 
-      # ----------------------------------------------------------
-      # Terraform Init - Validation Only
-      # ----------------------------------------------------------
-
-      - name: Terraform Init
+      - name: Terraform Init Validation
         run: terraform init -backend=false
-
-      # ----------------------------------------------------------
-      # Terraform Validate
-      # ----------------------------------------------------------
 
       - name: Terraform Validate
         run: terraform validate
-
-      # ----------------------------------------------------------
-      # TFLint
-      # ----------------------------------------------------------
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
@@ -82,20 +58,12 @@ jobs:
           tflint --init
           tflint --recursive --minimum-failure-severity=error
 
-      # ----------------------------------------------------------
-      # Checkov Security Scan
-      # ----------------------------------------------------------
-
       - name: Run Checkov Security Scan
         uses: bridgecrewio/checkov-action@master
         with:
           directory: environments/preprod
           framework: terraform
           soft_fail: true
-
-      # ----------------------------------------------------------
-      # Trivy Misconfiguration Scan
-      # ----------------------------------------------------------
 
       - name: Run Trivy Misconfiguration Scan
         uses: aquasecurity/trivy-action@master
@@ -106,15 +74,21 @@ jobs:
 
 
   # ============================================================
-  # STAGE 2 - TERRAFORM PLAN
+  # STAGE 2 - PLAN + APPROVAL + APPLY
   # ============================================================
 
-  terraform_plan:
-    name: "Stage 2: Terraform Plan"
+  terraform_deploy:
+    name: "Stage 2: Production Plan & Apply"
 
     needs: security_scan
 
     runs-on: ubuntu-latest
+
+    environment: production
+
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
 
     defaults:
       run:
@@ -129,14 +103,15 @@ jobs:
     steps:
 
       # ----------------------------------------------------------
-      # Checkout Repository
+      # CHECKOUT
       # ----------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+
       # ----------------------------------------------------------
-      # Setup Terraform
+      # TERRAFORM SETUP
       # ----------------------------------------------------------
 
       - name: Setup Terraform
@@ -144,8 +119,9 @@ jobs:
         with:
           terraform_wrapper: false
 
+
       # ----------------------------------------------------------
-      # Azure Login
+      # AZURE LOGIN
       # ----------------------------------------------------------
 
       - name: Azure Login
@@ -159,8 +135,9 @@ jobs:
               "tenantId": "${{ secrets.ARM_TENANT_ID }}"
             }
 
+
       # ----------------------------------------------------------
-      # Verify Azure Login
+      # VERIFY AZURE
       # ----------------------------------------------------------
 
       - name: Verify Azure Login
@@ -168,202 +145,80 @@ jobs:
           az account show
           az account list --output table
 
+
       # ----------------------------------------------------------
-      # Terraform Init
+      # TERRAFORM INIT
       # ----------------------------------------------------------
 
       - name: Terraform Init
         run: terraform init
 
-      # ==========================================================
-      # IMPORTANT:
-      # IMPORT EXISTING RESOURCE GROUPS BEFORE PLAN
-      # ==========================================================
+
+      # ----------------------------------------------------------
+      # IMPORT EXISTING RESOURCE GROUPS
+      # ----------------------------------------------------------
 
       - name: Import Existing Resource Groups
         shell: bash
         run: |
 
           echo "=============================================="
-          echo "Checking Terraform State"
+          echo "Checking rg1"
           echo "=============================================="
-
-          # ------------------------------------------------------
-          # RG1
-          # Azure Resource Group: rg-comp
-          # Terraform Key: rg1
-          # ------------------------------------------------------
-
-          echo ""
-          echo "Checking rg1..."
 
           if terraform state show \
             'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
             >/dev/null 2>&1
           then
-
-            echo "rg1 is already present in Terraform state."
-            echo "Skipping import."
-
+            echo "rg1 already exists in Terraform state."
           else
-
-            echo "rg1 is NOT present in Terraform state."
-            echo "Importing Azure Resource Group: rg-comp"
+            echo "rg1 not found in state."
+            echo "Importing rg-comp..."
 
             terraform import \
               'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
               "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp"
-
           fi
 
 
-          # ------------------------------------------------------
-          # RG2
-          # Azure Resource Group: rg-comp2
-          # Terraform Key: rg2
-          # ------------------------------------------------------
-
-          echo ""
-          echo "Checking rg2..."
+          echo "=============================================="
+          echo "Checking rg2"
+          echo "=============================================="
 
           if terraform state show \
             'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
             >/dev/null 2>&1
           then
-
-            echo "rg2 is already present in Terraform state."
-            echo "Skipping import."
-
+            echo "rg2 already exists in Terraform state."
           else
-
-            echo "rg2 is NOT present in Terraform state."
-            echo "Importing Azure Resource Group: rg-comp2"
+            echo "rg2 not found in state."
+            echo "Importing rg-comp2..."
 
             terraform import \
               'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
               "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp2"
-
           fi
 
 
-          # ------------------------------------------------------
-          # Display State
-          # ------------------------------------------------------
+      # ----------------------------------------------------------
+      # SHOW TERRAFORM STATE
+      # ----------------------------------------------------------
 
-          echo ""
-          echo "=============================================="
-          echo "Terraform State After Import"
-          echo "=============================================="
+      - name: Terraform State List
+        run: terraform state list
 
-          terraform state list
 
       # ----------------------------------------------------------
-      # Terraform Plan
+      # TERRAFORM PLAN
       # ----------------------------------------------------------
 
       - name: Terraform Plan
-        run: terraform plan -out=tfplan
+        run: terraform plan
+
 
       # ----------------------------------------------------------
-      # Upload Plan Artifact
-      # ----------------------------------------------------------
-
-      - name: Save Plan Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan
-          path: environments/preprod/tfplan
-
-
-  # ============================================================
-  # STAGE 3 - PRODUCTION APPROVAL + APPLY
-  # ============================================================
-
-  terraform_apply:
-    name: "Stage 3: Manual Approval & Apply"
-
-    needs: terraform_plan
-
-    if: >
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-      || github.event_name == 'workflow_dispatch'
-
-    runs-on: ubuntu-latest
-
-    environment: production
-
-    defaults:
-      run:
-        working-directory: environments/preprod
-
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-
-    steps:
-
-      # ----------------------------------------------------------
-      # Checkout Repository
-      # ----------------------------------------------------------
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # ----------------------------------------------------------
-      # Setup Terraform
-      # ----------------------------------------------------------
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false
-
-      # ----------------------------------------------------------
-      # Download EXACT Terraform Plan
-      # ----------------------------------------------------------
-
-      - name: Download Plan Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan
-          path: environments/preprod
-
-      # ----------------------------------------------------------
-      # Azure Login
-      # ----------------------------------------------------------
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: |
-            {
-              "clientId": "${{ secrets.ARM_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.ARM_CLIENT_SECRET }}",
-              "subscriptionId": "${{ secrets.ARM_SUBSCRIPTION_ID }}",
-              "tenantId": "${{ secrets.ARM_TENANT_ID }}"
-            }
-
-      # ----------------------------------------------------------
-      # Verify Azure Login
-      # ----------------------------------------------------------
-
-      - name: Verify Azure Login
-        run: |
-          az account show
-          az account list --output table
-
-      # ----------------------------------------------------------
-      # Terraform Init
-      # ----------------------------------------------------------
-
-      - name: Terraform Init
-        run: terraform init
-
-      # ----------------------------------------------------------
-      # Terraform Apply
+      # TERRAFORM APPLY
       # ----------------------------------------------------------
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve
