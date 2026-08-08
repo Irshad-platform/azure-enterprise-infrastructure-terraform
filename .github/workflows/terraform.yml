@@ -1,0 +1,284 @@
+name: Terraform Azure DevSecOps CI/CD
+
+on:
+  push:
+    branches:
+      - "**"
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+
+  # ============================================================
+  # STAGE 1: DevSecOps Security & Compliance Scanning
+  # ============================================================
+
+  security_scan:
+    name: "Stage 1: Security & Quality Scan"
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: environments/preprod
+
+    steps:
+
+      # ----------------------------------------------------------
+      # Checkout Repository
+      # ----------------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # Setup Terraform
+      # ----------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ----------------------------------------------------------
+      # Terraform Format
+      # ----------------------------------------------------------
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive ../..
+
+      # ----------------------------------------------------------
+      # Terraform Init - Validation Only
+      # ----------------------------------------------------------
+
+      - name: Terraform Init
+        run: terraform init -backend=false
+
+      # ----------------------------------------------------------
+      # Terraform Validate
+      # ----------------------------------------------------------
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      # ----------------------------------------------------------
+      # TFLint
+      # ----------------------------------------------------------
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.50.0
+
+      - name: Run TFLint
+        run: |
+          tflint --init
+          tflint --recursive --minimum-failure-severity=error
+
+      # ----------------------------------------------------------
+      # Checkov
+      # ----------------------------------------------------------
+
+      - name: Run Checkov Security Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: environments/preprod
+          framework: terraform
+          soft_fail: true
+
+      # ----------------------------------------------------------
+      # Trivy
+      # ----------------------------------------------------------
+
+      - name: Run Trivy Misconfiguration Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: environments/preprod
+          exit-code: 0
+
+
+  # ============================================================
+  # STAGE 2: Terraform Plan
+  # ============================================================
+
+  terraform_plan:
+    name: "Stage 2: Terraform Plan"
+    needs: security_scan
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: environments/preprod
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+
+      # ----------------------------------------------------------
+      # Checkout Repository
+      # ----------------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # Setup Terraform
+      # ----------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ----------------------------------------------------------
+      # Azure Login - Service Principal
+      # ----------------------------------------------------------
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.ARM_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.ARM_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.ARM_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.ARM_TENANT_ID }}"
+            }
+
+      # ----------------------------------------------------------
+      # Verify Azure Login
+      # ----------------------------------------------------------
+
+      - name: Verify Azure Login
+        run: |
+          az account show
+          az account list --output table
+
+      # ----------------------------------------------------------
+      # Terraform Init
+      # ----------------------------------------------------------
+
+      - name: Terraform Init
+        run: terraform init
+
+      # ----------------------------------------------------------
+      # Terraform Plan
+      # ----------------------------------------------------------
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      # ----------------------------------------------------------
+      # Upload Terraform Plan
+      # ----------------------------------------------------------
+
+      - name: Save Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: environments/preprod/tfplan
+
+
+  # ============================================================
+  # STAGE 3: Manual Approval & Terraform Apply
+  # ============================================================
+
+  terraform_apply:
+    name: "Stage 3: Manual Approval & Apply"
+    needs: terraform_plan
+
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
+
+    runs-on: ubuntu-latest
+
+    environment: production
+
+    defaults:
+      run:
+        working-directory: environments/preprod
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+
+      # ----------------------------------------------------------
+      # Checkout Repository
+      # ----------------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # Setup Terraform
+      # ----------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # ----------------------------------------------------------
+      # Download Terraform Plan
+      # ----------------------------------------------------------
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: environments/preprod
+
+      # ----------------------------------------------------------
+      # Azure Login - Service Principal
+      # ----------------------------------------------------------
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.ARM_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.ARM_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.ARM_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.ARM_TENANT_ID }}"
+            }
+
+      # ----------------------------------------------------------
+      # Verify Azure Login
+      # ----------------------------------------------------------
+
+      - name: Verify Azure Login
+        run: |
+          az account show
+          az account list --output table
+
+      # ----------------------------------------------------------
+      # Terraform Init
+      # ----------------------------------------------------------
+
+      - name: Terraform Init
+        run: terraform init
+
+      # ----------------------------------------------------------
+      # Terraform Apply
+      # ----------------------------------------------------------
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
