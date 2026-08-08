@@ -17,9 +17,9 @@ permissions:
 
 jobs:
 
-  # ============================================================
-  # STAGE 1 - CI / DEVSECOPS SECURITY SCAN
-  # ============================================================
+  # ==========================================================
+  # STAGE 1 - CI / DEVSECOPS
+  # ==========================================================
 
   security_scan:
     name: "Stage 1: Security & Quality Scan"
@@ -42,7 +42,7 @@ jobs:
       - name: Terraform Format Check
         run: terraform fmt -check -recursive ../..
 
-      - name: Terraform Init - Validation
+      - name: Terraform Init
         run: terraform init -backend=false
 
       - name: Terraform Validate
@@ -58,14 +58,14 @@ jobs:
           tflint --init
           tflint --recursive --minimum-failure-severity=error
 
-      - name: Run Checkov Security Scan
+      - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
         with:
           directory: environments/preprod
           framework: terraform
           soft_fail: true
 
-      - name: Run Trivy Misconfiguration Scan
+      - name: Run Trivy
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: config
@@ -73,23 +73,19 @@ jobs:
           exit-code: 0
 
 
-  # ============================================================
-  # STAGE 2 - TERRAFORM PLAN + APPLY
-  # ============================================================
+  # ==========================================================
+  # STAGE 2 - CD / PLAN + APPLY
+  # ==========================================================
 
   terraform_deploy:
     name: "Stage 2: Terraform Plan & Apply"
-
     needs: security_scan
 
     runs-on: ubuntu-latest
 
-    # GitHub Environment
-    # Configure required reviewers under:
-    # Settings -> Environments -> production
-    environment: production
+    environment:
+      name: production
 
-    # Apply only from main or manual execution
     if: >
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || github.event_name == 'workflow_dispatch'
@@ -106,17 +102,17 @@ jobs:
 
     steps:
 
-      # ========================================================
+      # --------------------------------------------------------
       # CHECKOUT
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
 
-      # ========================================================
-      # TERRAFORM SETUP
-      # ========================================================
+      # --------------------------------------------------------
+      # TERRAFORM
+      # --------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -124,9 +120,9 @@ jobs:
           terraform_wrapper: false
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # AZURE LOGIN
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Azure Login
         uses: azure/login@v2
@@ -140,192 +136,146 @@ jobs:
             }
 
 
-      # ========================================================
-      # VERIFY AZURE LOGIN
-      # ========================================================
+      # --------------------------------------------------------
+      # VERIFY AZURE
+      # --------------------------------------------------------
 
       - name: Verify Azure Login
-        run: |
-          echo "Azure Account:"
-          az account show
-
-          echo ""
-          echo "Azure Subscription:"
-          az account list --output table
+        run: az account show
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # TERRAFORM INIT
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Terraform Init
         run: terraform init
 
 
       # ========================================================
-      # IMPORT EXISTING RESOURCE GROUPS
+      # IMPORT EXISTING RESOURCES
       # ========================================================
 
-      - name: Import Existing Resource Groups
+      - name: Import Existing Resources
         shell: bash
         run: |
 
-          echo "=================================================="
-          echo "RESOURCE GROUP 1"
-          echo "=================================================="
+          set -e
 
-          if terraform state show \
+          echo "========================================"
+          echo "IMPORTING EXISTING AZURE RESOURCES"
+          echo "========================================"
+
+
+          # RG1
+          terraform state show \
             'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
-            >/dev/null 2>&1
-          then
-            echo "rg1 already exists in Terraform state."
-          else
-            echo "Importing rg1 -> rg-comp"
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp"
 
-            terraform import \
-              'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp"
-          fi
+
+          # RG2
+          terraform state show \
+            'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp2"
+
+
+          # VNET
+          terraform state show \
+            'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev"
+
+
+          # Bastion Public IP
+          terraform state show \
+            'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-bastion-dev"
+
+
+          # Application Gateway Public IP
+          terraform state show \
+            'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-appgw-dev"
+
+
+          # Key Vault
+          terraform state show \
+            'module.key_vault.azurerm_key_vault.kv["kv1"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.key_vault.azurerm_key_vault.kv["kv1"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.KeyVault/vaults/kv-comp-dev-123"
+
+
+          # Frontend Subnet
+          terraform state show \
+            'module.subnets.azurerm_subnet.subnets["snet1"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.subnets.azurerm_subnet.subnets["snet1"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/frontend-subnet-dev"
+
+
+          # Backend Subnet
+          terraform state show \
+            'module.subnets.azurerm_subnet.subnets["snet2"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.subnets.azurerm_subnet.subnets["snet2"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/backend-subnet-dev"
+
+
+          # Database Subnet
+          terraform state show \
+            'module.subnets.azurerm_subnet.subnets["snet3"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.subnets.azurerm_subnet.subnets["snet3"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/database-subnet-dev"
+
+
+          # Bastion Subnet
+          terraform state show \
+            'module.subnets.azurerm_subnet.subnets["snet4"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.subnets.azurerm_subnet.subnets["snet4"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/AzureBastionSubnet"
+
+
+          # Application Gateway Subnet
+          terraform state show \
+            'module.subnets.azurerm_subnet.subnets["snet5"]' \
+            >/dev/null 2>&1 || \
+          terraform import \
+            'module.subnets.azurerm_subnet.subnets["snet5"]' \
+            "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/AppGatewaySubnet"
 
 
           echo ""
-          echo "=================================================="
-          echo "RESOURCE GROUP 2"
-          echo "=================================================="
-
-          if terraform state show \
-            'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
-            >/dev/null 2>&1
-          then
-            echo "rg2 already exists in Terraform state."
-          else
-            echo "Importing rg2 -> rg-comp2"
-
-            terraform import \
-              'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp2"
-          fi
-
-
-      # ========================================================
-      # IMPORT EXISTING KEY VAULT
-      # ========================================================
-
-      - name: Import Existing Key Vault
-        shell: bash
-        run: |
-
-          echo "=================================================="
-          echo "KEY VAULT"
-          echo "=================================================="
-
-          if terraform state show \
-            'module.key_vault.azurerm_key_vault.kv["kv1"]' \
-            >/dev/null 2>&1
-          then
-            echo "Key Vault already exists in Terraform state."
-          else
-            echo "Importing kv1 -> kv-comp-dev-123"
-
-            terraform import \
-              'module.key_vault.azurerm_key_vault.kv["kv1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.KeyVault/vaults/kv-comp-dev-123"
-          fi
-
-
-      # ========================================================
-      # IMPORT EXISTING PUBLIC IP - BASTION
-      # ========================================================
-
-      - name: Import Existing Bastion Public IP
-        shell: bash
-        run: |
-
-          echo "=================================================="
-          echo "BASTION PUBLIC IP"
-          echo "=================================================="
-
-          if terraform state show \
-            'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
-            >/dev/null 2>&1
-          then
-            echo "Bastion Public IP already exists in Terraform state."
-          else
-            echo "Importing pip_bastion -> pip-bastion-dev"
-
-            terraform import \
-              'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-bastion-dev"
-          fi
-
-
-      # ========================================================
-      # IMPORT EXISTING PUBLIC IP - APPLICATION GATEWAY
-      # ========================================================
-
-      - name: Import Existing Application Gateway Public IP
-        shell: bash
-        run: |
-
-          echo "=================================================="
-          echo "APPLICATION GATEWAY PUBLIC IP"
-          echo "=================================================="
-
-          if terraform state show \
-            'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
-            >/dev/null 2>&1
-          then
-            echo "Application Gateway Public IP already exists in Terraform state."
-          else
-            echo "Importing pip_appgw -> pip-appgw-dev"
-
-            terraform import \
-              'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-appgw-dev"
-          fi
-
-
-      # ========================================================
-      # IMPORT EXISTING VNET
-      # ========================================================
-
-      - name: Import Existing Virtual Network
-        shell: bash
-        run: |
-
-          echo "=================================================="
-          echo "VIRTUAL NETWORK"
-          echo "=================================================="
-
-          if terraform state show \
-            'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
-            >/dev/null 2>&1
-          then
-            echo "VNet already exists in Terraform state."
-          else
-            echo "Importing vnet1 -> vnet-comp-dev"
-
-            terraform import \
-              'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev"
-          fi
-
-
-      # ========================================================
-      # SHOW CURRENT TERRAFORM STATE
-      # ========================================================
-
-      - name: Terraform State List
-        run: |
-          echo "=================================================="
+          echo "========================================"
           echo "CURRENT TERRAFORM STATE"
-          echo "=================================================="
+          echo "========================================"
 
           terraform state list
 
 
       # ========================================================
-      # TERRAFORM PLAN
+      # PLAN
       # ========================================================
 
       - name: Terraform Plan
@@ -333,8 +283,9 @@ jobs:
 
 
       # ========================================================
-      # TERRAFORM APPLY
+      # APPLY
       # ========================================================
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
+
