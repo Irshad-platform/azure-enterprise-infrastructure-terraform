@@ -18,7 +18,7 @@ permissions:
 jobs:
 
   # ============================================================
-  # STAGE 1: DevSecOps Security & Compliance Scanning
+  # STAGE 1 - CI / DEVSECOPS SECURITY SCAN
   # ============================================================
 
   security_scan:
@@ -48,7 +48,7 @@ jobs:
           terraform_wrapper: false
 
       # ----------------------------------------------------------
-      # Terraform Format
+      # Terraform Format Check
       # ----------------------------------------------------------
 
       - name: Terraform Format Check
@@ -83,7 +83,7 @@ jobs:
           tflint --recursive --minimum-failure-severity=error
 
       # ----------------------------------------------------------
-      # Checkov
+      # Checkov Security Scan
       # ----------------------------------------------------------
 
       - name: Run Checkov Security Scan
@@ -94,7 +94,7 @@ jobs:
           soft_fail: true
 
       # ----------------------------------------------------------
-      # Trivy
+      # Trivy Misconfiguration Scan
       # ----------------------------------------------------------
 
       - name: Run Trivy Misconfiguration Scan
@@ -106,12 +106,14 @@ jobs:
 
 
   # ============================================================
-  # STAGE 2: Terraform Plan
+  # STAGE 2 - TERRAFORM PLAN
   # ============================================================
 
   terraform_plan:
     name: "Stage 2: Terraform Plan"
+
     needs: security_scan
+
     runs-on: ubuntu-latest
 
     defaults:
@@ -143,7 +145,7 @@ jobs:
           terraform_wrapper: false
 
       # ----------------------------------------------------------
-      # Azure Login - Service Principal
+      # Azure Login
       # ----------------------------------------------------------
 
       - name: Azure Login
@@ -173,6 +175,88 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      # ==========================================================
+      # IMPORTANT:
+      # IMPORT EXISTING RESOURCE GROUPS BEFORE PLAN
+      # ==========================================================
+
+      - name: Import Existing Resource Groups
+        shell: bash
+        run: |
+
+          echo "=============================================="
+          echo "Checking Terraform State"
+          echo "=============================================="
+
+          # ------------------------------------------------------
+          # RG1
+          # Azure Resource Group: rg-comp
+          # Terraform Key: rg1
+          # ------------------------------------------------------
+
+          echo ""
+          echo "Checking rg1..."
+
+          if terraform state show \
+            'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
+            >/dev/null 2>&1
+          then
+
+            echo "rg1 is already present in Terraform state."
+            echo "Skipping import."
+
+          else
+
+            echo "rg1 is NOT present in Terraform state."
+            echo "Importing Azure Resource Group: rg-comp"
+
+            terraform import \
+              'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
+              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp"
+
+          fi
+
+
+          # ------------------------------------------------------
+          # RG2
+          # Azure Resource Group: rg-comp2
+          # Terraform Key: rg2
+          # ------------------------------------------------------
+
+          echo ""
+          echo "Checking rg2..."
+
+          if terraform state show \
+            'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
+            >/dev/null 2>&1
+          then
+
+            echo "rg2 is already present in Terraform state."
+            echo "Skipping import."
+
+          else
+
+            echo "rg2 is NOT present in Terraform state."
+            echo "Importing Azure Resource Group: rg-comp2"
+
+            terraform import \
+              'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
+              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp2"
+
+          fi
+
+
+          # ------------------------------------------------------
+          # Display State
+          # ------------------------------------------------------
+
+          echo ""
+          echo "=============================================="
+          echo "Terraform State After Import"
+          echo "=============================================="
+
+          terraform state list
+
       # ----------------------------------------------------------
       # Terraform Plan
       # ----------------------------------------------------------
@@ -181,7 +265,7 @@ jobs:
         run: terraform plan -out=tfplan
 
       # ----------------------------------------------------------
-      # Upload Terraform Plan
+      # Upload Plan Artifact
       # ----------------------------------------------------------
 
       - name: Save Plan Artifact
@@ -192,11 +276,12 @@ jobs:
 
 
   # ============================================================
-  # STAGE 3: Manual Approval & Terraform Apply
+  # STAGE 3 - PRODUCTION APPROVAL + APPLY
   # ============================================================
 
   terraform_apply:
     name: "Stage 3: Manual Approval & Apply"
+
     needs: terraform_plan
 
     if: >
@@ -236,7 +321,7 @@ jobs:
           terraform_wrapper: false
 
       # ----------------------------------------------------------
-      # Download Terraform Plan
+      # Download EXACT Terraform Plan
       # ----------------------------------------------------------
 
       - name: Download Plan Artifact
@@ -246,7 +331,7 @@ jobs:
           path: environments/preprod
 
       # ----------------------------------------------------------
-      # Azure Login - Service Principal
+      # Azure Login
       # ----------------------------------------------------------
 
       - name: Azure Login
