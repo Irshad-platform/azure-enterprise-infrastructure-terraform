@@ -3,10 +3,12 @@ name: Terraform Azure DevSecOps CI/CD
 on:
   push:
     branches:
-      - '**'
+      - "**"
+
   pull_request:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -15,17 +17,21 @@ permissions:
   id-token: write
 
 jobs:
-  # ==========================================
+
+  # ============================================================
   # STAGE 1: DevSecOps Security & Compliance Scanning
-  # ==========================================
+  # ============================================================
+
   security_scan:
     name: "Stage 1: Security & Quality Scan"
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: environments/preprod
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -56,35 +62,43 @@ jobs:
       - name: Run Checkov Security Scan
         uses: bridgecrewio/checkov-action@master
         with:
-          directory: azure_landing_zone/dev
+          directory: environments/preprod
           framework: terraform
           soft_fail: true
 
-      - name: Run Trivy Misconfig Scan
+      - name: Run Trivy Misconfiguration Scan
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'config'
-          scan-dir: 'azure_landing_zone/dev'
-          exit-code: '0'
+          scan-type: config
+          scan-ref: environments/preprod
+          exit-code: 0
 
-  # ==========================================
+
+  # ============================================================
   # STAGE 2: Terraform Plan Generation
-  # ==========================================
+  # ============================================================
+
   terraform_plan:
     name: "Stage 2: Terraform Plan"
     needs: security_scan
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
     defaults:
       run:
-        working-directory: azure_landing_zone/dev
+        working-directory: environments/preprod
 
     env:
+      ARM_USE_OIDC: true
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -93,50 +107,64 @@ jobs:
         with:
           terraform_wrapper: false
 
+      # Azure authentication using GitHub OIDC
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: |
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure Login
+        run: |
+          az account show
+          az account list --output table
 
       - name: Terraform Init
         run: terraform init
 
       - name: Terraform Plan
-        id: plan
         run: terraform plan -out=tfplan
 
       - name: Save Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
-          path: azure_landing_zone/dev/tfplan
+          path: environments/preprod/tfplan
 
-  # ==========================================
-  # STAGE 3: Manual Approval Gate & Apply
-  # ==========================================
+
+  # ============================================================
+  # STAGE 3: Manual Approval Gate & Terraform Apply
+  # ============================================================
+
   terraform_apply:
     name: "Stage 3: Manual Approval & Apply"
     needs: terraform_plan
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'workflow_dispatch'
+
     runs-on: ubuntu-latest
+
     environment: production
+
+    permissions:
+      contents: read
+      id-token: write
+
     defaults:
       run:
-        working-directory: azure_landing_zone/dev
+        working-directory: environments/preprod
 
     env:
+      ARM_USE_OIDC: true
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -149,18 +177,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan
-          path: azure_landing_zone/dev
+          path: environments/preprod
 
+      # Azure authentication using GitHub OIDC
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: |
-            {
-              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
-            }
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure Login
+        run: |
+          az account show
+          az account list --output table
 
       - name: Terraform Init
         run: terraform init
