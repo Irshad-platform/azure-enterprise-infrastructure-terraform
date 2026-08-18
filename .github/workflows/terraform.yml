@@ -31,7 +31,7 @@ jobs:
   security_scan:
     name: "Stage 1: Security & Quality Scan"
 
-    runs-on: [self-hosted, infra]
+    runs-on: self-hosted
 
     defaults:
       run:
@@ -150,7 +150,7 @@ jobs:
 
     needs: security_scan
 
-    runs-on: [self-hosted, infra]
+    runs-on: self-hosted
 
     defaults:
       run:
@@ -257,7 +257,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
 
-    runs-on: [self-hosted, infra]
+    runs-on: self-hosted
 
     environment:
       name: production
@@ -296,7 +296,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
 
-    runs-on: [self-hosted, infra]
+    runs-on: self-hosted
 
     defaults:
       run:
