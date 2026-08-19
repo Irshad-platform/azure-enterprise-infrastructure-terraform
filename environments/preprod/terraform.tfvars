@@ -6,11 +6,6 @@ rgs = {
   rg2 = {
     name     = "rg-comp2"
     location = "centralindia"
-  }
-    rg3 = {
-    name     = "rg-comp3"
-    location = "eastus"
-  }
 }
 
 vnets = {
@@ -144,4 +139,5 @@ key_vaults = {
     rg_name     = "rg-comp"
     secret_name = "admin-password"
   }
+}
 }
