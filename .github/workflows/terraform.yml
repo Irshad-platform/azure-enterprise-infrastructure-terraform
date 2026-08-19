@@ -29,34 +29,21 @@ jobs:
   # ============================================================
 
   test_runner:
+  name: "TEST - Self-Hosted Runner"
 
-    name: "TEST - Self-Hosted Runner"
+  runs-on:
+    group: Default
+    labels: self-hosted
 
-    runs-on: self-hosted
-
-    steps:
-
-      - name: Test Self-Hosted Runner
-        shell: powershell
-        run: |
-          Write-Host "=============================================="
-          Write-Host "SELF-HOSTED RUNNER WORKING"
-          Write-Host "=============================================="
-
-          Write-Host "Hostname:"
-          hostname
-
-          Write-Host "User:"
-          whoami
-
-          Write-Host "PowerShell:"
-          $PSVersionTable.PSVersion
-
-          Write-Host "Terraform:"
-          terraform version
-
-          Write-Host "Azure CLI:"
-          az version
+  steps:
+    - name: Test Self-Hosted Runner
+      shell: powershell
+      run: |
+        Write-Host "SELF-HOSTED RUNNER WORKING"
+        hostname
+        whoami
+        terraform version
+        az version
 
 
   # ============================================================
