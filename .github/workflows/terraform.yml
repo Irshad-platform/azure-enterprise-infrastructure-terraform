@@ -11,76 +11,52 @@ on:
 
   workflow_dispatch:
 
+
+# ============================================================
+# PERMISSIONS
+# ============================================================
+
 permissions:
   contents: read
   pull-requests: write
 
 
+# ============================================================
+# JOBS
+# ============================================================
+
 jobs:
 
-  # ============================================================
-  # TEMPORARY SELF-HOSTED RUNNER TEST
-  #
-  # Purpose:
-  #   Verify that GitHub can successfully route a job
-  #   to the organization-level self-hosted runner.
-  #
-  # After this test succeeds, this job can be removed.
-  # ============================================================
-
-  test_runner:
-  name: "TEST - Self-Hosted Runner"
-
-  runs-on:
-    group: Default
-    labels: self-hosted
-
-  steps:
-    - name: Test Self-Hosted Runner
-      shell: powershell
-      run: |
-        Write-Host "SELF-HOSTED RUNNER WORKING"
-        hostname
-        whoami
-        terraform version
-        az version
-
-
-  # ============================================================
+  # ==========================================================
   # STAGE 1 - SECURITY & QUALITY SCAN
-  #
-  # Runs on:
-  #   - Feature branch push
-  #   - Pull Request to main
-  #   - main push
-  # ============================================================
+  # ==========================================================
 
   security_scan:
 
     name: "Stage 1: Security & Quality Scan"
 
-    needs: test_runner
-
-    runs-on: self-hosted
+    # YOUR CURRENT WINDOWS SELF-HOSTED RUNNER
+    runs-on: [self-hosted, Windows, X64]
 
     defaults:
       run:
         working-directory: environments/preprod
-        shell: bash
+        shell: powershell
+
 
     steps:
 
-      # ========================================================
+      # ------------------------------------------------------
       # CHECKOUT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM SETUP
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -92,33 +68,33 @@ jobs:
         run: terraform version
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM FORMAT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive ../..
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM INIT VALIDATION
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Init Validation
         run: terraform init -backend=false
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM VALIDATE
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Validate
         run: terraform validate
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TFLINT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
@@ -132,9 +108,9 @@ jobs:
           tflint --recursive --minimum-failure-severity=error
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # CHECKOV
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
@@ -144,9 +120,9 @@ jobs:
           soft_fail: true
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TRIVY
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Run Trivy
         uses: aquasecurity/trivy-action@master
@@ -156,27 +132,9 @@ jobs:
           exit-code: 0
 
 
-  # ============================================================
+  # ==========================================================
   # STAGE 2 - TERRAFORM PLAN
-  #
-  # Feature branch:
-  #   Test Runner
-  #       ↓
-  #   Security Scan
-  #       ↓
-  #   Terraform Plan
-  #
-  # Main:
-  #   Test Runner
-  #       ↓
-  #   Security Scan
-  #       ↓
-  #   Terraform Plan
-  #       ↓
-  #   Manual Approval
-  #       ↓
-  #   Terraform Apply
-  # ============================================================
+  # ==========================================================
 
   terraform_plan:
 
@@ -184,32 +142,35 @@ jobs:
 
     needs: security_scan
 
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
 
     defaults:
       run:
         working-directory: environments/preprod
-        shell: bash
+        shell: powershell
+
 
     env:
+
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
+
     steps:
 
-      # ========================================================
+      # ------------------------------------------------------
       # CHECKOUT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM SETUP
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -221,9 +182,9 @@ jobs:
         run: terraform version
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # AZURE LOGIN
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Azure Login
         uses: azure/login@v2
@@ -237,47 +198,45 @@ jobs:
             }
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # VERIFY AZURE
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Verify Azure Login
-        run: |
-          az account show
+        run: az account show
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM INIT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Init
         run: terraform init
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM PLAN
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Plan
         run: terraform plan
 
 
-  # ============================================================
+  # ==========================================================
   # STAGE 3 - MANUAL APPROVAL
   #
-  # ONLY MAIN
+  # ONLY MAIN BRANCH
   #
   # GitHub Environment:
-  #   production
+  # production
   #
-  # Required reviewers should be configured in:
+  # Required reviewers must be configured in:
   #
-  # Repository
-  #   → Settings
-  #   → Environments
-  #   → production
-  #   → Required reviewers
-  # ============================================================
+  # Settings
+  #   -> Environments
+  #      -> production
+  #         -> Required reviewers
+  # ==========================================================
 
   manual_approval:
 
@@ -289,10 +248,11 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
 
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
 
     environment:
       name: production
+
 
     steps:
 
@@ -304,18 +264,21 @@ jobs:
           Write-Host "=============================================="
 
 
-  # ============================================================
+  # ==========================================================
   # STAGE 4 - TERRAFORM APPLY
   #
-  # ONLY MAIN
+  # ONLY MAIN BRANCH
   #
-  # Flow:
+  # FLOW:
   #
-  # Stage 1 → PASS
-  # Stage 2 → PASS
-  # Stage 3 → APPROVED
-  # Stage 4 → APPLY
-  # ============================================================
+  # Security Scan
+  #       ↓
+  # Terraform Plan
+  #       ↓
+  # Manual Approval
+  #       ↓
+  # Terraform Apply
+  # ==========================================================
 
   terraform_apply:
 
@@ -327,35 +290,39 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
 
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
 
     defaults:
       run:
         working-directory: environments/preprod
-        shell: bash
+        shell: powershell
+
 
     environment:
       name: production
 
+
     env:
+
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
+
     steps:
 
-      # ========================================================
+      # ------------------------------------------------------
       # CHECKOUT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM SETUP
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -367,9 +334,9 @@ jobs:
         run: terraform version
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # AZURE LOGIN
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Azure Login
         uses: azure/login@v2
@@ -383,26 +350,25 @@ jobs:
             }
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # VERIFY AZURE
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Verify Azure Login
-        run: |
-          az account show
+        run: az account show
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM INIT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Init
         run: terraform init
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM APPLY
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
