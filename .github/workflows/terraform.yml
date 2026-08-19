@@ -11,109 +11,235 @@ on:
 
   workflow_dispatch:
 
+
+# ============================================================
+# PERMISSIONS
+# ============================================================
+
 permissions:
   contents: read
   pull-requests: write
 
+
+# ============================================================
+# JOBS
+# ============================================================
+
 jobs:
 
-  # ============================================================
-  # STAGE 1 - CI / DEVSECOPS
-  # ============================================================
+  # ==========================================================
+  # STAGE 1 - SECURITY & QUALITY SCAN
+  # ==========================================================
 
   security_scan:
+
     name: "Stage 1: Security & Quality Scan"
-    runs-on: ubuntu-latest
+
+    runs-on: [self-hosted, Windows, X64]
 
     defaults:
       run:
         working-directory: environments/preprod
+        shell: cmd
+
 
     steps:
 
+      # ------------------------------------------------------
+      # CHECKOUT
+      # ------------------------------------------------------
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+
+      # ------------------------------------------------------
+      # ADD DEVOPS TOOLS TO PATH
+      #
+      # Tools installed on:
+      # C:\DEVOPS\Tools
+      #
+      # checkov.exe
+      # gitleaks.exe
+      # infracost.exe
+      # terrascan.exe
+      # tflint.exe
+      # tfsec.exe
+      # trivy.exe
+      # trufflehog.exe
+      # ------------------------------------------------------
+
+      - name: Add DevOps Tools to PATH
+        run: |
+          echo C:\DEVOPS\Tools>>%GITHUB_PATH%
+
+
+      # ------------------------------------------------------
+      # VERIFY RUNNER AND TOOLS
+      # ------------------------------------------------------
+
+      - name: Verify Runner and Security Tools
+        run: |
+          echo ==============================================
+          echo SELF-HOSTED RUNNER
+          echo ==============================================
+          echo Runner Name: %RUNNER_NAME%
+          echo Runner OS: %RUNNER_OS%
+          echo Runner Architecture: %RUNNER_ARCH%
+          echo ==============================================
+          echo SECURITY TOOLS
+          echo ==============================================
+
+          where tflint
+          where checkov
+          where trivy
+
+          echo ==============================================
+          echo TFLINT VERSION
+          echo ==============================================
+          tflint --version
+
+          echo ==============================================
+          echo CHECKOV VERSION
+          echo ==============================================
+          checkov --version
+
+          echo ==============================================
+          echo TRIVY VERSION
+          echo ==============================================
+          trivy --version
+
+
+      # ------------------------------------------------------
+      # TERRAFORM SETUP
+      # ------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
+
+      # ------------------------------------------------------
+      # TERRAFORM VERSION
+      # ------------------------------------------------------
+
+      - name: Terraform Version
+        run: terraform version
+
+
+      # ------------------------------------------------------
+      # TERRAFORM FORMAT
+      # ------------------------------------------------------
+
       - name: Terraform Format Check
         run: terraform fmt -check -recursive ../..
+
+
+      # ------------------------------------------------------
+      # TERRAFORM INIT VALIDATION
+      # ------------------------------------------------------
 
       - name: Terraform Init Validation
         run: terraform init -backend=false
 
+
+      # ------------------------------------------------------
+      # TERRAFORM VALIDATE
+      # ------------------------------------------------------
+
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: v0.50.0
+
+      # ------------------------------------------------------
+      # TFLINT
+      # ------------------------------------------------------
+
+      - name: TFLint Init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init
+
 
       - name: Run TFLint
         run: |
-          tflint --init
           tflint --recursive --minimum-failure-severity=error
 
+
+      # ------------------------------------------------------
+      # CHECKOV
+      #
+      # Uses local:
+      # C:\DEVOPS\Tools\checkov.exe
+      # ------------------------------------------------------
+
       - name: Run Checkov
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: environments/preprod
-          framework: terraform
-          soft_fail: true
+        run: |
+          checkov -d . --framework terraform --soft-fail
+
+
+      # ------------------------------------------------------
+      # TRIVY
+      #
+      # Uses local:
+      # C:\DEVOPS\Tools\trivy.exe
+      # ------------------------------------------------------
 
       - name: Run Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: config
-          scan-ref: environments/preprod
-          exit-code: 0
+        run: |
+          trivy config . --exit-code 0
 
 
-  # ============================================================
-  # STAGE 2 - TERRAFORM PLAN + APPLY
-  # ============================================================
+  # ==========================================================
+  # STAGE 2 - TERRAFORM PLAN
+  # ==========================================================
 
-  terraform_deploy:
-    name: "Stage 2: Terraform Plan & Apply"
+  terraform_plan:
+
+    name: "Stage 2: Terraform Plan"
 
     needs: security_scan
 
-    runs-on: ubuntu-latest
-
-    environment:
-      name: production
-
-    if: >
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-      || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, Windows, X64]
 
     defaults:
       run:
         working-directory: environments/preprod
+        shell: cmd
+
 
     env:
+
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
+
     steps:
 
-      # ========================================================
+      # ------------------------------------------------------
       # CHECKOUT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
 
-      # ========================================================
+      # ------------------------------------------------------
+      # ADD DEVOPS TOOLS TO PATH
+      # ------------------------------------------------------
+
+      - name: Add DevOps Tools to PATH
+        run: |
+          echo C:\DEVOPS\Tools>>%GITHUB_PATH%
+
+
+      # ------------------------------------------------------
       # TERRAFORM SETUP
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -121,9 +247,17 @@ jobs:
           terraform_wrapper: false
 
 
-      # ========================================================
+      # ------------------------------------------------------
+      # TERRAFORM VERSION
+      # ------------------------------------------------------
+
+      - name: Terraform Version
+        run: terraform version
+
+
+      # ------------------------------------------------------
       # AZURE LOGIN
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Azure Login
         uses: azure/login@v2
@@ -137,301 +271,192 @@ jobs:
             }
 
 
-      # ========================================================
-      # VERIFY AZURE
-      # ========================================================
+      # ------------------------------------------------------
+      # VERIFY AZURE LOGIN
+      # ------------------------------------------------------
 
       - name: Verify Azure Login
         run: |
           az account show
 
 
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM INIT
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Init
-        run: terraform init
-
-
-      # ========================================================
-      # IMPORT EXISTING RESOURCES
-      # ========================================================
-
-      - name: Import Existing Azure Resources
-        shell: bash
         run: |
-
-          set -e
-
-          echo "=============================================="
-          echo "CHECKING EXISTING AZURE RESOURCES"
-          echo "=============================================="
+          terraform init
 
 
-          # ======================================================
-          # RESOURCE GROUP 1
-          # ======================================================
-
-          if terraform state show \
-            'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
-            >/dev/null 2>&1
-          then
-            echo "rg1 already in state - SKIP"
-          else
-            terraform import \
-              'module.resource_group.azurerm_resource_group.resource_group["rg1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp"
-          fi
-
-
-          # ======================================================
-          # RESOURCE GROUP 2
-          # ======================================================
-
-          if terraform state show \
-            'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
-            >/dev/null 2>&1
-          then
-            echo "rg2 already in state - SKIP"
-          else
-            terraform import \
-              'module.resource_group.azurerm_resource_group.resource_group["rg2"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp2"
-          fi
-
-
-          # ======================================================
-          # VNET
-          # ======================================================
-
-          if terraform state show \
-            'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
-            >/dev/null 2>&1
-          then
-            echo "vnet1 already in state - SKIP"
-          else
-            terraform import \
-              'module.virtual_network.azurerm_virtual_network.vnets["vnet1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev"
-          fi
-
-
-          # ======================================================
-          # BASTION PUBLIC IP
-          # ======================================================
-
-          if terraform state show \
-            'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
-            >/dev/null 2>&1
-          then
-            echo "pip_bastion already in state - SKIP"
-          else
-            terraform import \
-              'module.public_ip.azurerm_public_ip.pip["pip_bastion"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-bastion-dev"
-          fi
-
-
-          # ======================================================
-          # APP GATEWAY PUBLIC IP
-          # ======================================================
-
-          if terraform state show \
-            'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
-            >/dev/null 2>&1
-          then
-            echo "pip_appgw already in state - SKIP"
-          else
-            terraform import \
-              'module.public_ip.azurerm_public_ip.pip["pip_appgw"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/publicIPAddresses/pip-appgw-dev"
-          fi
-
-
-          # ======================================================
-          # KEY VAULT
-          # ======================================================
-
-          if terraform state show \
-            'module.key_vault.azurerm_key_vault.kv["kv1"]' \
-            >/dev/null 2>&1
-          then
-            echo "kv1 already in state - SKIP"
-          else
-            terraform import \
-              'module.key_vault.azurerm_key_vault.kv["kv1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.KeyVault/vaults/kv-comp-dev-123"
-          fi
-
-
-          # ======================================================
-          # SUBNET 1
-          # ======================================================
-
-          if terraform state show \
-            'module.subnets.azurerm_subnet.subnets["snet1"]' \
-            >/dev/null 2>&1
-          then
-            echo "snet1 already in state - SKIP"
-          else
-            terraform import \
-              'module.subnets.azurerm_subnet.subnets["snet1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/frontend-subnet-dev"
-          fi
-
-
-          # ======================================================
-          # SUBNET 2
-          # ======================================================
-
-          if terraform state show \
-            'module.subnets.azurerm_subnet.subnets["snet2"]' \
-            >/dev/null 2>&1
-          then
-            echo "snet2 already in state - SKIP"
-          else
-            terraform import \
-              'module.subnets.azurerm_subnet.subnets["snet2"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/backend-subnet-dev"
-          fi
-
-
-          # ======================================================
-          # SUBNET 3
-          # ======================================================
-
-          if terraform state show \
-            'module.subnets.azurerm_subnet.subnets["snet3"]' \
-            >/dev/null 2>&1
-          then
-            echo "snet3 already in state - SKIP"
-          else
-            terraform import \
-              'module.subnets.azurerm_subnet.subnets["snet3"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/database-subnet-dev"
-          fi
-
-
-          # ======================================================
-          # BASTION SUBNET
-          # ======================================================
-
-          if terraform state show \
-            'module.subnets.azurerm_subnet.subnets["snet4"]' \
-            >/dev/null 2>&1
-          then
-            echo "snet4 already in state - SKIP"
-          else
-            terraform import \
-              'module.subnets.azurerm_subnet.subnets["snet4"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/AzureBastionSubnet"
-          fi
-
-
-          # ======================================================
-          # APP GATEWAY SUBNET
-          # ======================================================
-
-          if terraform state show \
-            'module.subnets.azurerm_subnet.subnets["snet5"]' \
-            >/dev/null 2>&1
-          then
-            echo "snet5 already in state - SKIP"
-          else
-            terraform import \
-              'module.subnets.azurerm_subnet.subnets["snet5"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/virtualNetworks/vnet-comp-dev/subnets/AppGatewaySubnet"
-          fi
-
-
-          # ======================================================
-          # BASTION HOST
-          # ======================================================
-
-          if terraform state show \
-            'module.bastion.azurerm_bastion_host.bastion["bastion1"]' \
-            >/dev/null 2>&1
-          then
-            echo "bastion1 already in state - SKIP"
-          else
-            terraform import \
-              'module.bastion.azurerm_bastion_host.bastion["bastion1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/bastionHosts/bastion-dev"
-          fi
-
-
-          # ======================================================
-          # KEY VAULT SECRET
-          # ======================================================
-
-          if terraform state show \
-            'module.key_vault.azurerm_key_vault_secret.admin_password["kv1"]' \
-            >/dev/null 2>&1
-          then
-            echo "admin-password already in state - SKIP"
-          else
-            terraform import \
-              'module.key_vault.azurerm_key_vault_secret.admin_password["kv1"]' \
-              "https://kv-comp-dev-123.vault.azure.net/secrets/admin-password/cefb31a36262455f83606aa10016c44b"
-          fi
-
-
-          # ======================================================
-          # FRONTEND NIC 1 - CURRENTLY REQUIRED
-          # ======================================================
-
-          if terraform state show \
-            'module.virtual_machines.azurerm_network_interface.nic["frontend_1"]' \
-            >/dev/null 2>&1
-          then
-            echo "frontend_1 NIC already in state - SKIP"
-          else
-            terraform import \
-              'module.virtual_machines.azurerm_network_interface.nic["frontend_1"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/networkInterfaces/frontend-vm-nic-1-dev"
-          fi
-
-
-          # ======================================================
-          # FRONTEND NIC 2 - CURRENTLY REQUIRED
-          # ======================================================
-
-          if terraform state show \
-            'module.virtual_machines.azurerm_network_interface.nic["frontend_2"]' \
-            >/dev/null 2>&1
-          then
-            echo "frontend_2 NIC already in state - SKIP"
-          else
-            terraform import \
-              'module.virtual_machines.azurerm_network_interface.nic["frontend_2"]' \
-              "/subscriptions/${ARM_SUBSCRIPTION_ID}/resourceGroups/rg-comp/providers/Microsoft.Network/networkInterfaces/frontend-vm-nic-2-dev"
-          fi
-
-
-          # ======================================================
-          # SHOW STATE
-          # ======================================================
-
-          echo ""
-          echo "=============================================="
-          echo "FINAL TERRAFORM STATE"
-          echo "=============================================="
-
-          terraform state list
-
-
-      # ========================================================
+      # ------------------------------------------------------
       # TERRAFORM PLAN
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Plan
-        run: terraform plan
+        run: |
+          terraform plan
 
 
-      # ========================================================
+  # ==========================================================
+  # STAGE 3 - MANUAL APPROVAL
+  #
+  # ONLY MAIN BRANCH
+  #
+  # Required reviewers:
+  # Settings
+  #   -> Environments
+  #      -> production
+  #         -> Required reviewers
+  # ==========================================================
+
+  manual_approval:
+
+    name: "Stage 3: Manual Approval"
+
+    needs: terraform_plan
+
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on: [self-hosted, Windows, X64]
+
+    environment:
+      name: production
+
+
+    steps:
+
+      - name: Production Approval Gate
+        shell: cmd
+        run: |
+          echo ==============================================
+          echo PRODUCTION DEPLOYMENT APPROVED
+          echo ==============================================
+
+
+  # ==========================================================
+  # STAGE 4 - TERRAFORM APPLY
+  #
+  # ONLY MAIN BRANCH
+  #
+  # FLOW:
+  #
+  # Stage 1 Security Scan
+  #          ↓
+  # Stage 2 Terraform Plan
+  #          ↓
+  # Stage 3 Manual Approval
+  #          ↓
+  # Stage 4 Terraform Apply
+  # ==========================================================
+
+  terraform_apply:
+
+    name: "Stage 4: Terraform Apply"
+
+    needs: manual_approval
+
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on: [self-hosted, Windows, X64]
+
+    defaults:
+      run:
+        working-directory: environments/preprod
+        shell: cmd
+
+
+    environment:
+      name: production
+
+
+    env:
+
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+
+    steps:
+
+      # ------------------------------------------------------
+      # CHECKOUT
+      # ------------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+
+      # ------------------------------------------------------
+      # ADD DEVOPS TOOLS TO PATH
+      # ------------------------------------------------------
+
+      - name: Add DevOps Tools to PATH
+        run: |
+          echo C:\DEVOPS\Tools>>%GITHUB_PATH%
+
+
+      # ------------------------------------------------------
+      # TERRAFORM SETUP
+      # ------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+
+      # ------------------------------------------------------
+      # TERRAFORM VERSION
+      # ------------------------------------------------------
+
+      - name: Terraform Version
+        run: terraform version
+
+
+      # ------------------------------------------------------
+      # AZURE LOGIN
+      # ------------------------------------------------------
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.ARM_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.ARM_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.ARM_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.ARM_TENANT_ID }}"
+            }
+
+
+      # ------------------------------------------------------
+      # VERIFY AZURE LOGIN
+      # ------------------------------------------------------
+
+      - name: Verify Azure Login
+        run: |
+          az account show
+
+
+      # ------------------------------------------------------
+      # TERRAFORM INIT
+      # ------------------------------------------------------
+
+      - name: Terraform Init
+        run: |
+          terraform init
+
+
+      # ------------------------------------------------------
       # TERRAFORM APPLY
-      # ========================================================
+      # ------------------------------------------------------
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: |
+          terraform apply -auto-approve
