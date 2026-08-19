@@ -6,11 +6,11 @@ rgs = {
   rg2 = {
     name     = "rg-comp2"
     location = "centralindia"
-}
- rg3 = {
+  }
+  rg3 = {
     name     = "rg-comp3"
     location = "centralindia"
-}
+  }
 }
 
 vnets = {
