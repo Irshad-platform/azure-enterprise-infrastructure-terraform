@@ -11,25 +11,68 @@ on:
 
   workflow_dispatch:
 
-
 permissions:
   contents: read
   pull-requests: write
 
 
-# ============================================================
-# STAGE 1 - SECURITY & QUALITY SCAN
-#
-# Runs on:
-#   - Feature branch push
-#   - Pull Request to main
-#   - main push
-# ============================================================
-
 jobs:
 
+  # ============================================================
+  # TEMPORARY SELF-HOSTED RUNNER TEST
+  #
+  # Purpose:
+  #   Verify that GitHub can successfully route a job
+  #   to the organization-level self-hosted runner.
+  #
+  # After this test succeeds, this job can be removed.
+  # ============================================================
+
+  test_runner:
+
+    name: "TEST - Self-Hosted Runner"
+
+    runs-on: self-hosted
+
+    steps:
+
+      - name: Test Self-Hosted Runner
+        shell: powershell
+        run: |
+          Write-Host "=============================================="
+          Write-Host "SELF-HOSTED RUNNER WORKING"
+          Write-Host "=============================================="
+
+          Write-Host "Hostname:"
+          hostname
+
+          Write-Host "User:"
+          whoami
+
+          Write-Host "PowerShell:"
+          $PSVersionTable.PSVersion
+
+          Write-Host "Terraform:"
+          terraform version
+
+          Write-Host "Azure CLI:"
+          az version
+
+
+  # ============================================================
+  # STAGE 1 - SECURITY & QUALITY SCAN
+  #
+  # Runs on:
+  #   - Feature branch push
+  #   - Pull Request to main
+  #   - main push
+  # ============================================================
+
   security_scan:
+
     name: "Stage 1: Security & Quality Scan"
+
+    needs: test_runner
 
     runs-on: self-hosted
 
@@ -126,22 +169,26 @@ jobs:
           exit-code: 0
 
 
-
   # ============================================================
   # STAGE 2 - TERRAFORM PLAN
   #
-  # Runs after Stage 1.
-  #
   # Feature branch:
-  #   Security Scan → Plan
-  #
-  # PR:
-  #   Security Scan → Plan
+  #   Test Runner
+  #       ↓
+  #   Security Scan
+  #       ↓
+  #   Terraform Plan
   #
   # Main:
-  #   Security Scan → Plan → Manual Approval → Apply
-  #
-  # NO APPLY IN THIS JOB
+  #   Test Runner
+  #       ↓
+  #   Security Scan
+  #       ↓
+  #   Terraform Plan
+  #       ↓
+  #   Manual Approval
+  #       ↓
+  #   Terraform Apply
   # ============================================================
 
   terraform_plan:
@@ -158,7 +205,6 @@ jobs:
         shell: bash
 
     env:
-
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
@@ -229,16 +275,15 @@ jobs:
         run: terraform plan
 
 
-
   # ============================================================
   # STAGE 3 - MANUAL APPROVAL
   #
   # ONLY MAIN
   #
   # GitHub Environment:
-  # production
+  #   production
   #
-  # Configure required reviewers in:
+  # Required reviewers should be configured in:
   #
   # Repository
   #   → Settings
@@ -265,12 +310,11 @@ jobs:
     steps:
 
       - name: Production Approval Gate
-        shell: bash
+        shell: powershell
         run: |
-          echo "=============================================="
-          echo "PRODUCTION DEPLOYMENT APPROVED"
-          echo "=============================================="
-
+          Write-Host "=============================================="
+          Write-Host "PRODUCTION DEPLOYMENT APPROVED"
+          Write-Host "=============================================="
 
 
   # ============================================================
@@ -307,7 +351,6 @@ jobs:
       name: production
 
     env:
-
       ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
       ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
@@ -376,4 +419,3 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
-# Self-hosted runner test
