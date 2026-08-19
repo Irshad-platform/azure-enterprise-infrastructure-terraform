@@ -110,13 +110,12 @@ jobs:
       # TFLINT
       # ------------------------------------------------------
 
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: v0.50.0
-
-
+      - name: Verify TFLint
+        run: tflint --version
+        
       - name: Run TFLint
+        env: |
+         GITHUB_TOKEN: ${{ github.token }}
         run: |
           tflint --init
           tflint --recursive --minimum-failure-severity=error
