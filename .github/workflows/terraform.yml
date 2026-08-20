@@ -141,7 +141,7 @@ jobs:
       # ------------------------------------------------------
 
       - name: Terraform Init Validation
-        run: terraform init -backend=false
+        run: terraform init -backend=false -input=false
 
 
       # ------------------------------------------------------
@@ -286,7 +286,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init
+          run: terraform init -input=false
 
 
       # ------------------------------------------------------
@@ -450,7 +450,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init
+          run: terraform init -input=false
 
 
       # ------------------------------------------------------
