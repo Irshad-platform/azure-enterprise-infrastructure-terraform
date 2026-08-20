@@ -285,8 +285,7 @@ jobs:
       # ------------------------------------------------------
 
       - name: Terraform Init
-        run: |
-          run: terraform init -input=false
+        run: terraform init -input=false
 
 
       # ------------------------------------------------------
@@ -449,8 +448,8 @@ jobs:
       # ------------------------------------------------------
 
       - name: Terraform Init
-        run: |
-          run: terraform init -input=false
+        run: terraform init -input=false
+          
 
 
       # ------------------------------------------------------
